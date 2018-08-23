@@ -22,6 +22,7 @@ import locale
 import uuid
 from errno import EACCES, EPERM
 import datetime
+import csv
 
 # pylint: disable=import-error
 try:
@@ -172,6 +173,46 @@ def _linux_cpudata():
         grains['cpu_flags'] = []
     return grains
 
+def _windows_gpu_data():
+    '''
+    num_gpus: int
+    gpus:
+      - vendor: nvidia|amd|ati|...
+        model: string
+    '''
+    grains = {}
+    if __opts__.get('enable_gpu_grains', True) is False:
+        return grains
+
+    # Helpers for specific vendors
+    known_vendors = ['nvidia', 'amd', 'ati', 'intel', 'cirrus logic',
+                     'vmware', 'matrox', 'aspeed']
+
+    # Grab gpu data from wmic
+    try:
+        wmic_cmd = '{0} path win32_VideoController get name /format:csv'.format(wmic)
+        wmic_out = __salt__['cmd.run'](wmic_cmd)
+        wmic_out_dict = csv.DictReader(wmic_out)
+        devs = [row('Name') for row in wmic_out_dict]
+    except OSError:
+        pass
+
+    # Populate list of gpus on system
+    gpus = []
+    for gpu in devs:
+        vendor_strings = gpu['Vendor'].lower().split()
+        # default vendor to 'unknown', overwrite if we match a known one
+        vendor = 'unknown'
+        for name in known_vendors:
+            # search for an 'expected' vendor name in the list of strings
+            if name in vendor_strings:
+                vendor = name
+                break
+        gpus.append({'vendor': vendor, 'model': gpu['Device']})
+
+    grains['num_gpus'] = len(gpus)
+    grains['gpus'] = gpus
+    return grains
 
 def _linux_gpu_data():
     '''
